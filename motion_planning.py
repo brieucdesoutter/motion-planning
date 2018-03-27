@@ -22,10 +22,7 @@ class States(Enum):
     PLANNING = auto()
 
 
-def create_config_space(center_global_pos, data):
-    pass
-
-def read_center_global_pos(filename):
+def read_grid_anchor_global_pos(filename):
     '''
     Read and parse the first line of the given file which must have the following format:
     'lat0 <lat_in_decimal_degrees>, lon0 <lon_in_decimal_degrees>
@@ -39,7 +36,7 @@ def read_center_global_pos(filename):
         return np.array([float(lon_str), float(lat_str.strip(',')), 0])
 
 
-def local_to_grid_index(local_pos, north_offset, east_offset):
+def local_to_grid(local_pos, north_offset, east_offset):
     """
     Convert a local position in the current NED frame (center in the home position)
     into the grid index of the cell containing that position.
@@ -144,46 +141,43 @@ class MotionPlanning(Drone):
         TARGET_ALTITUDE = 5
         SAFETY_DISTANCE = 5
 
-        # Read the obstacle map
-        center_global_pos = read_center_global_pos('colliders.csv')
-        data = np.loadtxt('colliders.csv', delimiter=',', dtype='Float64', skiprows=2)
+        # Read the obstacle map anchor position and set as home position.
+        # Setting the home position fix the local NED frame
+        grid_anchor_global_pos = read_grid_anchor_global_pos('colliders.csv')
+        self.set_home_position(*grid_anchor_global_pos)
+        print('home global position  {0}'.format(self.global_home))
 
-        # Define a grid for a particular altitude and safety margin around obstacles
+        # Read the obstacle data and create a config space grid
+        data = np.loadtxt('colliders.csv', delimiter=',', dtype='Float64', skiprows=2)
         grid, north_offset, east_offset = create_grid(data, TARGET_ALTITUDE, SAFETY_DISTANCE)
         print("North offset = {0}, east offset = {1}".format(north_offset, east_offset))
 
-        # set the target altitude
-        self.target_position[2] = TARGET_ALTITUDE
-
-        # Initialize the home position to the position describe on the first line of the 'colliders.csv' file.
-        # the home position then becomes the center of the grid computed below
-        self.set_home_position(*center_global_pos)
-
-        # convert the current global position of the drone into a (north,east) offset from the grid center
-        local_pos = global_to_local(self.global_position, self.global_home)
-
-        print('home global position  {0}\n'
-              'drone global position {1}\n'
-              'drone local position  {2}'.format(self.global_home, self.global_position, self.local_position))
-
-        # Define starting point on the grid (this is just grid center)
-        grid_start = local_to_grid_index(local_pos, north_offset, east_offset)
-
+        # Convert the current global position of the drone into a (north,east) offset from the grid center
+        drone_local_pos = global_to_local(self.global_position, self.global_home)
+        drone_grid_pos = local_to_grid(drone_local_pos, north_offset, east_offset)
+        print('drone global position {0}\n'
+              'drone local position  {1}\n'
+              'drone grid position   {2}'.format(self.global_position, drone_local_pos, drone_grid_pos))
 
         # Set arbitrary goal in global coordinates
         # and convert to a grid cell goal
         goal_global_pos = np.array([-122.400150, 37.796005, 0])
         goal_local_pos = global_to_local(goal_global_pos, self.global_home)
-        goal_grid_pos = local_to_grid_index(goal_local_pos, north_offset, east_offset)
+        goal_grid_pos = local_to_grid(goal_local_pos, north_offset, east_offset)
         print('goal global position {0}\n'
               'goal local position  {1}\n'
               'goal grid position   {2}'.format(goal_global_pos, goal_local_pos, goal_grid_pos))
 
         # Run A* to find a path from start to goal
         # or move to a different search space such as a graph (not done here)
-        print('Grid Start and Goal: ', grid_start, goal_grid_pos)
-        path, _ = a_star(grid, heuristic, grid_start, goal_grid_pos)
-        path = prune_path(path)
+        print('Grid Start and Goal: ', drone_grid_pos, goal_grid_pos)
+        path, _ = a_star(grid, heuristic, drone_grid_pos, goal_grid_pos)
+        print('Path length before pruning = {}'.format(len(path)))
+        path = prune_path(path, grid)
+        print('Path length after pruning = {}'.format(len(path)))
+
+        # set the target altitude
+        self.target_position[2] = TARGET_ALTITUDE
 
         # TODO (if you're feeling ambitious): Try a different approach altogether!
 

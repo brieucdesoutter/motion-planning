@@ -46,42 +46,100 @@ The provided code only allows north/south and east/west movements leading the st
 
 #### 1. Set your global home position
 
-We read the home position from the `colliders.csv` file in the `motion_planning.py#read_home_position` method.
-We open the file, read the first line, split around space, remove comma and then convert the lon and lat tokens into 
-float:
+We read the "grid anchor" global position from the `colliders.csv` file in the 
+`motion_planning.py#plan_path` method and then set the home position of the drone:
 ```python
-def read_home_position(filename):
-    with open(filename) as input:
-        home = next(input)
-        _, lat_str, _, lon_str = home.split(" ")
-        return float(lat_str.strip(',')), float(lon_str)
+# Read the obstacle map 'anchor position' and set as home position.
+# Setting the home position fixes the local NED frame
+grid_anchor_global_pos = read_grid_anchor_global_pos('colliders.csv')
+self.set_home_position(*grid_anchor_global_pos)
 ```
-
-We then call the drone `set_home_position` method of the drone.
-
 
 #### 2. Set your current local position
 
-Here as long as you successfully determine your local position relative to global home you'll be all set. 
-Explain briefly how you accomplished this in your code.
+Once we set the home position and hence fix the local NED frame, we can compute the drone's local coordinates:
+```python
+# Convert the current global position of the drone into a (north,east) offset from the grid center
+local_pos = global_to_local(self.global_position, self.global_home)
+```
 
-
-Meanwhile, here's a picture of me flying through the trees!
-![Forest Flying](./misc/in_the_trees.png)
 
 #### 3. Set grid start position from local position
-This is another step in adding flexibility to the start location. As long as it works you're good to go!
+
+Before we can compute the grid start position from the local position, we need to create the grid in order to 
+get the grid offset, i.e. the local coordinates of south west corner of the grid cell (grid.row-1, 0):
+```python
+# Read the obstacle data and create a config space grid
+data = np.loadtxt('colliders.csv', delimiter=',', dtype='Float64', skiprows=2)
+grid, north_offset, east_offset = create_grid(data, TARGET_ALTITUDE, SAFETY_DISTANCE)
+```
 
 #### 4. Set grid goal position from geodetic coords
-This step is to add flexibility to the desired goal location. Should be able to choose any (lat, lon) within the map and have it rendered to a goal location on the grid.
+
+In the current code the goal position in global (aka geodetic) coordinates is arbitrarily hard-coded to 
+lon = -122.400150 deg, lat = 37.796005.
+
+To convert those coordinates into a grid position, we first convert them to local coordinates, using the `global_to_local`
+utility function from `frame_utils`, then convert the local coordinates to grid position by rounding to int and applying 
+the gird offset in the new `motion_planning.py#local_to_grid` utility function:
+```python
+goal_global_pos = np.array([-122.400150, 37.796005, 0])
+goal_local_pos = global_to_local(goal_global_pos, self.global_home)
+goal_grid_pos = local_to_grid(goal_local_pos, north_offset, east_offset)
+```
+
+We are now ready to plan a path.
 
 #### 5. Modify A* to include diagonal motion (or replace A* altogether)
-Minimal requirement here is to modify the code in planning_utils() to update the A* implementation to include diagonal motions on the grid that have a cost of sqrt(2), but more creative solutions are welcome. Explain the code you used to accomplish this step.
+
+To include diagonal actions, we add the following values to the Action enum:
+```python
+NORTH_WEST = (-1, -1, math.sqrt(2))
+NORTH_EAST = (-1, 1, math.sqrt(2))
+SOUTH_EAST = (1, 1, math.sqrt(2))
+SOUTH_WEST = (1, -1, math.sqrt(2))
+```
+
+We also modify the `planning_utils.py#valid_actions` function by adding the following cases:
+```python
+if x - 1 < 0 or y - 1 < 0 or grid[x - 1, y - 1] == 1:
+    valid_actions.remove(Action.NORTH_WEST)
+if x - 1 < 0 or y + 1 > m or grid[x - 1, y + 1] == 1:
+    valid_actions.remove(Action.NORTH_EAST)
+if x + 1 > n or y - 1 < 0 or grid[x + 1, y - 1] == 1:
+    valid_actions.remove(Action.SOUTH_WEST)
+if x + 1 > n or y + 1 > m or grid[x + 1, y + 1] == 1:
+    valid_actions.remove(Action.SOUTH_EAST)
+```
+
+The rest of the algorithm works the same as before.
 
 #### 6. Cull waypoints 
-For this step you can use a collinearity test or ray tracing method like Bresenham. The idea is simply to prune your path of unnecessary waypoints. Explain the code you used to accomplish this step.
 
+We remove waypoints by checking 3 successive points in `planning_utils.py#prune_path`:
+- if the 3 points are collinear(`collinearity_check`), remove the middle point
+- if not, we check if a direct path if feasible (`direct_path_check`)
 
+```python
+def prune_path(path, grid):
+    pruned_path = [p for p in path]
+
+    i = 0
+    while i < len(pruned_path) - 2:
+        print("Path length = {}".format(len(pruned_path)))
+        p1 = pruned_path[i]
+        p2 = pruned_path[i+1]
+        p3 = pruned_path[i+2]
+        if collinearity_check(p1, p2, p3):
+            del pruned_path[i+1]
+        elif direct_path_check(p1, p2, p3, grid):
+            del pruned_path[i+1]
+        else:
+            i = i + 1
+```
+
+Without the `direct_path_check` the path is reduced to 27 cells. With the extra check we reduce the path further to 19 cells.
+Still the presence of some points in the path eludes me...
 
 ### Execute the flight
 #### 1. Does it work?

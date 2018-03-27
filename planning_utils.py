@@ -1,5 +1,6 @@
 from enum import Enum
 from queue import PriorityQueue
+from bresenham import bresenham
 import numpy as np
 import math
 
@@ -164,22 +165,37 @@ def point(p):
 
 
 def collinearity_check(p1, p2, p3, epsilon=1e-6):
-    m = np.concatenate((p1, p2, p3), 0)
+    m = np.concatenate((point(p1), point(p2), point(p3)), 0)
     det = np.linalg.det(m)
     return abs(det) < epsilon
 
-def prune_path(path):
+def direct_path_check(p1, p2, p3, grid):
+    direct = True
+    cells = bresenham(p1, p3)
+    for c in cells:
+        if grid[c[0], c[1]] == 1:
+            direct = False
+            break
+    return direct
+
+
+def prune_path(path, grid):
     pruned_path = [p for p in path]
 
     i = 0
     while i < len(pruned_path) - 2:
-        p1 = point(pruned_path[i])
-        p2 = point(pruned_path[i+1])
-        p3 = point(pruned_path[i+2])
-
+        print("Path length = {}".format(len(pruned_path)))
+        p1 = pruned_path[i]
+        p2 = pruned_path[i+1]
+        p3 = pruned_path[i+2]
+        # print("Checking bi-segments {0}-{1}-{2}...".format(p1, p2, p3))
         if collinearity_check(p1, p2, p3):
+            # print("Collinear ! Removing point {}".format(p2))
+            del pruned_path[i+1]
+        elif direct_path_check(p1, p2, p3, grid):
+            # print("Direct path feasible ! Removing point {}".format(p2))
             del pruned_path[i+1]
         else:
-            i = i+1
+            i = i + 1
 
     return pruned_path
