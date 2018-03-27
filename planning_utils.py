@@ -102,8 +102,13 @@ def valid_actions(grid, current_node):
 
 def a_star(grid, h, start, goal):
     """
-    Given a grid and heuristic function returns
-    the lowest cost path from start to goal.
+    compute the shortest path from start to goal in the given grid and heuristic.
+
+    :param grid: a grid of feasible cells (0) and unfeasible cells (1)
+    :param h: the heuristic to compute the low estimate of the distance for a current cell to the goal
+    :param start: the start cell grid coordinates in [0..grid.row -1] x [0..grid.col -1]
+    :param goal:  the goal cell grid coordinates in [0..grid.row-1] x [0..grid.col -1]
+    :return: the shortest path from start grid cell to goal grid cell if any or an empty path, and the cost of the path.
     """
 
     path = []

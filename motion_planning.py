@@ -39,6 +39,16 @@ def read_center_global_pos(filename):
         return np.array([float(lon_str), float(lat_str.strip(',')), 0])
 
 
+def local_to_grid_index(local_pos, north_offset, east_offset):
+    """
+    Convert a local position in the current NED frame (center in the home position)
+    into the grid index of the cell containing that position.
+    :param local_pos: a position in the current local NED frame
+    :return: the grid coordinates of the cell containing that position.
+    """
+    return int(np.floor(local_pos[0])) - north_offset, int(np.floor(local_pos[1])) - east_offset
+
+
 class MotionPlanning(Drone):
 
     def __init__(self, connection):
@@ -150,35 +160,37 @@ class MotionPlanning(Drone):
         self.set_home_position(*center_global_pos)
 
         # convert the current global position of the drone into a (north,east) offset from the grid center
-        global_north, global_east, _ = global_to_local(self.global_position, self.global_home)
-        print("north, east = {}, {}".format(global_north, global_east))
+        local_pos = global_to_local(self.global_position, self.global_home)
 
-        print('global home {0}, position {1}, local position {2}'.format(self.global_home, self.global_position,
-                                                                         self.local_position))
+        print('home global position  {0}\n'
+              'drone global position {1}\n'
+              'drone local position  {2}'.format(self.global_home, self.global_position, self.local_position))
+
         # Define starting point on the grid (this is just grid center)
-        grid_start = (int(np.floor(global_north)) - north_offset, int(np.floor(global_east)) - east_offset)
+        grid_start = local_to_grid_index(local_pos, north_offset, east_offset)
 
-        # Set goal as some arbitrary position on the grid
-        grid_goal = (grid_start[0] + 10, grid_start[1] + 10)
 
-        # TODO: adapt to set goal as latitude / longitude position and convert
-        goal = np.array([-122.397940, 37.792829, TARGET_ALTITUDE])
-        
+        # Set arbitrary goal in global coordinates
+        # and convert to a grid cell goal
+        goal_global_pos = np.array([-122.400150, 37.796005, 0])
+        goal_local_pos = global_to_local(goal_global_pos, self.global_home)
+        goal_grid_pos = local_to_grid_index(goal_local_pos, north_offset, east_offset)
+        print('goal global position {0}\n'
+              'goal local position  {1}\n'
+              'goal grid position   {2}'.format(goal_global_pos, goal_local_pos, goal_grid_pos))
+
         # Run A* to find a path from start to goal
-        # TODO: add diagonal motions with a cost of sqrt(2) to your A* implementation
         # or move to a different search space such as a graph (not done here)
-        print('Local Start and Goal: ', grid_start, grid_goal)
-        path, _ = a_star(grid, heuristic, grid_start, grid_goal)
-        
-        # TODO: prune path to minimize number of waypoints
+        print('Grid Start and Goal: ', grid_start, goal_grid_pos)
+        path, _ = a_star(grid, heuristic, grid_start, goal_grid_pos)
         path = prune_path(path)
+
         # TODO (if you're feeling ambitious): Try a different approach altogether!
 
-        # Convert path to waypoints
+        # Convert path to waypoints in the local NED frame
         waypoints = [[p[0] + north_offset, p[1] + east_offset, TARGET_ALTITUDE, 0] for p in path]
-        # Set self.waypoints
         self.waypoints = waypoints
-        # TODO: send waypoints to sim (this is just for visualization of waypoints)
+        # send waypoints to sim to visualize the path
         self.send_waypoints()
 
     def start(self):
